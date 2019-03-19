@@ -3,6 +3,7 @@ import requests
 from owlready2 import *
 from datetime import datetime
 import re
+import dictdiffer
 
 ############ File : edam.json ####
 # File created with edam.sh script
@@ -46,7 +47,7 @@ def get_value(value, entry):
 # Announce something on stdout and log.txt
 def announcement(text):
     print(text)
-    fichier_log.write(text+"\n\n")
+    fichier_log.write(text+"\n")
 
 ############ Functions search_owl () ####
 # Search an uri from EDAM ontology file
@@ -55,7 +56,7 @@ def search_owl(entry,debian_entry,category):
     operation = dict(uri=None, term=None)
     myonto = onto.search_one(label=entry,iri="*"+category+"*")
     if not myonto:
-        announcement("/!\(1) package \"" + debian_entry['package'] + "\", no EDAM " + category +" for \"" + entry + "\" on http://bioportal.bioontology.org/ontologies/EDAM version 1.21")
+        announcement("\n/!\(1) package \"" + debian_entry['package'] + "\", no EDAM " + category +" for \"" + entry + "\" on http://bioportal.bioontology.org/ontologies/EDAM version 1.21")
     else:
         operation['uri'] = myonto.iri
         operation['term'] = entry
@@ -75,7 +76,7 @@ def search_function(debian_entry):
                     for function_entry in debian_edam_entry['function']:
                         operation_tab.append(search_owl(function_entry, debian_entry, "operation"))
                 else:
-                    announcement("/!\(2) package \"" + debian_entry['package'] + "\", la fonction\"" + function_entry + " est écris sous forme de chaine de caractère et non de tableau dans le edam.json, elle devrait ressembler à \" 'function': ['" + function_entry + "'] \"")
+                    announcement("\n/!\(2) package \"" + debian_entry['package'] + "\", the function \"" + function_entry + " is writted like a  is written as a character string and not as a table in the edam.json, it should look like this \" 'function': ['" + function_entry + "'] \"")
                     function_entry = get_value("function", debian_edam_entry)
                     operation_tab.append(search_owl(function_entry, debian_entry, "operation"))
                 biotools_function['operation'] = operation_tab
@@ -96,7 +97,7 @@ def search_topic(debian_entry):
                 biotools_topics.append(search_owl(topics_entry, debian_entry,"topic"))
         else:
             topics_entry = debian_entry['topics']
-            announcement("/!\(3) package \"" + debian_entry['package'] + "\", le topic\"" + topics_entry + " est écris sous forme de chaine de caractère et non de tableau dans le edam.json, elle devrait ressembler à \" 'function': ['" + topics_entry + "'] \"")
+            announcement("\n/!\(3) package \"" + debian_entry['package'] + "\", the Topic\"" + topics_entry + " is writted like a  is written as a character string and not as a table in the edam.json, it should look like this \" 'topic': ['" + topics_entry + "'] \"")
             biotools_topics.append(search_owl(topics_entry, debian_entry,"topic"))
     return biotools_topics
 
@@ -105,24 +106,23 @@ def search_topic(debian_entry):
 def search_publication(debian_entry):
     if(is_setted('doi',debian_entry)):
         doi = debian_entry['doi']
-        m = re.search("(?P<excess>.*doi\.org.*\/)(?P<doi>\d+.*)", doi)
+        m = re.search("(?P<excess>.*doi[^/:]*[\/:])(?P<doi>\d+.*$)", doi)
         if m is not None:
             newdoi=m.group('doi')
             excess=m.group('excess')
-            announcement("/!\(4) package \"" + debian_entry['package'] + "\", dans le edam.json le doi \"" + doi + "\" ne doit pas comporter l'URL \"" + excess + " \" il devrai être sous cette forme \"" + newdoi + "\"")
+            announcement("\n/!\(4) package \"" + debian_entry['package'] + "\", in edam.json the doi \"" + doi + "\" can't be composed of the prefix \"" + excess + " \". It should be like: \"" + newdoi + "\"")
             doi=newdoi
         authors_list = []
         metadata = dict(title="", abstract="", date="", citationCount="", authors=authors_list, journal="")
         publication = dict(doi=doi, pmid=None, pmcid=None, type=None, version=None, metadata=metadata)
         publi = requests.get("https://doi.org/"+doi, headers={'Accept': 'application/vnd.citationstyles.csl+json'})
         if (publi.status_code != 200):
-            announcement("/!\(5) package \"" + debian_entry['package'] + "\", dans edam.json le doi \"" + doi + "\" n'a pas un format reconnu par doi.org")
+            announcement("\n/!\(5) package \"" + debian_entry['package'] + "\", in edam.json the doi :\"" + doi + "\" is not recognized by doi.org")
             return None
         publi_json = publi.json()
         publication['type'] = get_value('type', publi_json)  # type
-        # publication['version'] = get_value('issue', publi_json)  # issue pour la version ??   ==> NON
         metadata['title'] = get_value('title', publi_json)  # metadata.title
-        # metadata['abstract']=                              ?? Pas d'abstract dans la requete
+        metadata['abstract'] = get_value('abstract', publi_json) # metadata.abstract
         if is_setted('indexed', publi_json):
             metadata['date'] = get_value('date-time', publi_json['indexed'])  # metadata.date
         metadata['citationCount'] = get_value('is-referenced-by-count',publi_json)  # metadata.citationCount   # S'en assurer
@@ -144,9 +144,34 @@ def search_publication(debian_entry):
     else:
         return None
 
+############ Functions search_duplicate() ####
+# Search duplicate package entry
+def search_duplicate(debian_entry,seen,double):
+    package=get_value('package', debian_entry)
+    if package not in seen:
+        seen.add(package)
+    else:
+        announcement("\n/!\(6) package \"" + debian_entry['package'] + "\", has two entry into edam.json. Here are the difference")
+        double.append(package)
+        second_entry=debian_entry
+        first_entry = None
+        for debian_entry2 in debian_med_metadata:
+            if get_value('package', debian_entry2) == package :
+                first_entry = debian_entry2
+                break
+        for diff in list(dictdiffer.diff(first_entry, second_entry)):
+                announcement("-In '"+str(diff[1])+"' :"+str(diff[2]))
+    return seen,double
+
+
 #################################################################################
 # START
 
+# tables to search duplicate package entry
+package_seen = set()
+package_double = []
+
+# to see processing time
 start_datetime=datetime.now()
 print(str(start_datetime))
 print('Starting analyses, please wait...\n')
@@ -156,10 +181,13 @@ i=0 #debug 10 lines
 for debian_entry in debian_med_metadata:
 
     print(i)
-    if i<830  :#debug pass X lines
-        print(get_value('doi',debian_entry))
-        i += 1
-        continue
+    # if i<860  :#debug pass X lines
+    #     print(get_value('doi',debian_entry))
+    #     i += 1
+    #     continue
+
+    # -----------------------------------------------------------------------------------------------------------------------
+    package_seen, package_double = search_duplicate(debian_entry, package_seen, package_double)
     # -----------------------------------------------------------------------------------------------------------------------
     biotools_entry = dict(name='', description='', homepage='', biotoolsID='', biotoolsCURIE='', version=[], otherID=[],
                           function=[], toolType=[], topic=[], operatingSystem=[], language=[], license='',
@@ -240,7 +268,8 @@ for debian_entry in debian_med_metadata:
 print('\ndone!')
 
 end_datetime=datetime.now()
-announcement("start    : " + str(start_datetime))
+announcement("\n" + str(i) + "packages")
+announcement("\nstart    : " + str(start_datetime))
 announcement("end      : " + str(end_datetime))
 announcement("duration : " + str(end_datetime-start_datetime))
 fichier_log.close()
