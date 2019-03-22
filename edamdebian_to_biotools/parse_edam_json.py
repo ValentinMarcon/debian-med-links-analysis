@@ -5,6 +5,7 @@ from datetime import datetime
 import re
 import dictdiffer
 import copy
+import yaml
 
 ############ File : edam.json ####
 # File created with edam.sh script
@@ -182,6 +183,8 @@ def check_on_biotools(debianbt_entry,biotools_list):
     if db_biotoolsID != None:
         for biotools_entry in biotools_list:
             if biotools_entry['biotoolsID'].lower() == db_biotoolsID.lower():
+                biotool_exist_list.append(biotools_entry)
+                biotool_exist_wthbtid_list.append(biotools_entry['biotoolsID'])
                 print("Debian BiotoolsID exist on Biotools")
                 print("bt_orig :" + biotools_entry['biotoolsID'] +" | db_btid :" + db_biotoolsID +" | db_pckg :" + db_package)
                 return(biotools_entry)
@@ -190,6 +193,7 @@ def check_on_biotools(debianbt_entry,biotools_list):
     elif db_package != None:
         for biotools_entry in biotools_list:
             if biotools_entry['biotoolsID'].lower() == db_package.lower():
+                biotool_exist_list.append(biotools_entry)
                 print("Debian entry exist on Biotools but don't have BiotoolsID")
                 print("bt_orig :" + biotools_entry['biotoolsID'] + " | db_pckg :" + db_package)
                 return(biotools_entry)
@@ -223,7 +227,6 @@ def compare_with_bt(debianbt_entry,biotools_entry,biotools_list):
                             NEW_entry[diff[1]]=biotools_entry[diff[1]]
 
         biotools_entry=NEW_entry  #Ne prend pas en compte les changements, juste les ajout
-        biotool_exist_list.append(biotoolexist)
         if(bool_add):
             biotool_modif_list.append(biotools_entry)
             biotools_file = "NEWresult/Modif_" + debianbt_entry['package'] + ".json"
@@ -260,18 +263,41 @@ def create_new_bt_file(debianbt_entry,biotools_entry,biotools_list):
         print(biotools_file)
         json.dump(biotools_entry, open(biotools_file, 'w'))
 
+############ Functions mapping_biotoolsid() ####
+def mapping_biotoolsid(debianbt_entry,biotools_list,mapping):
+    db_biotoolsID=get_value('bio.tools', debianbt_entry)
+    db_package=get_value('package', debianbt_entry)
+    if db_biotoolsID != None:
+        for biotools_entry in biotools_list:
+            bt_biotoolsID=biotools_entry['biotoolsID']
+            if bt_biotoolsID.lower() == db_biotoolsID.lower():
+                if not is_setted(bt_biotoolsID,mapping) :
+                    mapping[bt_biotoolsID]=[]
+                mapping[bt_biotoolsID].append(db_package)
+    return mapping
+
+############ create_yaml() ####
+def create_yaml(filename, mapping):
+    with open(filename, 'w') as f:
+        yaml.dump(mapping, f)
+
 
 #################################################################################
 # START
 
-# tables to search duplicate package entry
+# Tables to search duplicate package entry
 package_seen = set()
 package_double = []
+# Mapping between bio.tools & debian
+mapping=dict()
+# List for stats
 biotool_exist_list = []
+biotool_exist_wthbtid_list = []
 biotool_new_list = []
 biotool_modif_list = []
 biotool_keep_list = []
 biotool_notfound_list = []
+prospective_package_list = []
 
 # to see processing time
 start_datetime=datetime.now()
@@ -281,12 +307,21 @@ print('Starting analyses, please wait...\n')
 i=0 #debug 10 lines
 
 for debianbt_entry in debian_med_metadata:
-
+    i += 1
     # if i<860  :#debug pass X lines
     #     print(get_value('doi',debian_entry))
     #     i += 1
     #     continue
+    # if i == 100:
+    #     break
 
+
+    print("\n|"+ str(i) + " " + get_value('package', debianbt_entry))
+    if (get_value('distribution', debianbt_entry) == "prospective"):
+        print("Debian entry is prospective package")
+        prospective_package_list.append(debianbt_entry)
+        continue
+    mapping = mapping_biotoolsid(debianbt_entry, biotools_list, mapping)
     # -----------------------------------------------------------------------------------------------------------------------
     package_seen, package_double = search_duplicate(debianbt_entry, package_seen, package_double)
     # -----------------------------------------------------------------------------------------------------------------------
@@ -297,7 +332,6 @@ for debianbt_entry in debian_med_metadata:
                           lastUpdate='', editPermission=None, validated='', homepage_status='')
     #-----------------------------------------------------------------------------------------------------------------------
     biotools_entry['name'] = get_value('package', debianbt_entry)
-    print("\n|"+ str(i+1) + " " + biotools_entry['name'])
     # -----------------------------------------------------------------------------------------------------------------------
     biotools_entry['description'] = get_value('description', debianbt_entry)
     # -----------------------------------------------------------------------------------------------------------------------
@@ -368,7 +402,7 @@ for debianbt_entry in debian_med_metadata:
     # #json.dump(biotools_entry,open(biotools_file,'w'))
     # print(biotools_entry) ##
 
-    i += 1  # debug 10 lines
+
     #if i==10 : break    #debug 10 lines
 
 
@@ -376,20 +410,24 @@ print('\ndone!')
 
 print("Number debian entry:")
 print(i)
-print("Number biotools package exist:")
+print("Number of db package exist on biotools :")
 print(len(biotool_exist_list))
-print("Number biotools package modified:")
-print(len(biotool_modif_list))
-print("Number new biotools package from debian:")
-print(len(biotool_new_list))
-print("Number of debian tools with biotoolsID but not found on Biotools:")
+print("Number of db package have a Biotool ID:")
+print(len(biotool_exist_wthbtid_list))
+print("Number of db package with biotoolsID but not found on Biotools:")
 print(len(biotool_notfound_list))
+print("Number of new biotools package from debian:")
+print(len(biotool_new_list))
+print("Number of biotools package modified:")
+print(len(biotool_modif_list))
 print("Number of debian package seen two time in edam.json:")
 print(len(package_double))
-
+print("Number of package \"prospective\":")
+print(len(prospective_package_list))
+create_yaml("Mapping_db_bt_draft.yaml",mapping)
 
 end_datetime=datetime.now()
-announcement("\n" + str(i) + "packages")
+announcement("\n" + str(i) + " packages")
 announcement("\nstart    : " + str(start_datetime))
 announcement("end      : " + str(end_datetime))
 announcement("duration : " + str(end_datetime-start_datetime))
