@@ -130,7 +130,7 @@ print(merged_filtered_df)
 print(merged_filtered_df.shape[0])
 fichier_merge.write(str(merged_filtered_df)+"\n\n\n")
 info_util["nb_ent_filter"]=len(merged_filtered_df)
-info_util["infos"]="Nombre d'entrée sur biotools qui ont un biotoolsID null"
+info_util["infos"]="Nombre d'entrée sur debian qui ont un biotoolsID non trouvé"
 
 # ##### TEST de comparaison des Doi
 # print('merging debian and bio.tools data, please wait...')
