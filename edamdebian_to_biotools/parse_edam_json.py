@@ -13,7 +13,9 @@ import yaml
 # the debian team)
 # https://salsa.debian.org/blends-team/website/blob/master/misc/sql/edam.sh
 print('loading debian data, please wait...')
-debian_med_metadata = json.load(open('edam.json'))
+#debian_med_metadata = json.load(open('edam.json'))
+#debian_med_metadata = json.load(open('resultsSQLfile.json'))
+debian_med_metadata = json.load(open('edamv2.json'))
 
 ############ File : biotools.json ####
 print('loading bio.tools data, please wait...')
@@ -66,13 +68,13 @@ def announcement(text):
 # Search an uri from EDAM ontology file
 # in a specified category
 def search_owl(entry,debian_entry,category):
-    operation = dict(uri=None, term=None)
+    operation = dict(term=None,uri=None)
     myonto = onto.search_one(label=entry,iri="*"+category+"*")
     if not myonto:
         announcement("\n/!\(1) package \"" + debian_entry['package'] + "\", no EDAM " + category +" for \"" + entry + "\" on http://bioportal.bioontology.org/ontologies/EDAM version 1.21")
     else:
-        operation['uri'] = myonto.iri
         operation['term'] = entry
+        operation['uri'] = myonto.iri
         return operation
 
 ############ Functions search_function() ####
@@ -87,14 +89,53 @@ def search_function(debian_entry):
                 operation_tab = []
                 if isinstance(debian_edam_entry['function'], list):
                     for function_entry in debian_edam_entry['function']:
-                        operation_tab.append(search_owl(function_entry, debian_entry, "operation"))
+                        operation = search_owl(function_entry, debian_entry, "operation")
+                        if operation != None:
+                            operation_tab.append(operation)
                 else:
-                    announcement("\n/!\(2) package \"" + debian_entry['package'] + "\", the function \"" + function_entry + "\" is written as a character string and not as a table, in the edam.json, it should look like this \" 'function': ['" + function_entry + "'] \"")
+                    announcement("\n/!\(2.0) package \"" + debian_entry['package'] + "\", the function \"" + function_entry + "\" is written as a character string and not as a table, in the edam.json, it should look like this \" 'function': ['" + function_entry + "'] \"")
                     function_entry = get_value("function", debian_edam_entry)
-                    operation_tab.append(search_owl(function_entry, debian_entry, "operation"))
+                    operation=search_owl(function_entry, debian_entry, "operation")
+                    if operation != None:
+                        operation_tab.append(operation)
                 biotools_function['operation'] = operation_tab
-                biotools_function['input'] = get_value("inputs", debian_edam_entry)      # S'assurer que c'est bien le format attendu
-                biotools_function['output'] = get_value("outputs", debian_edam_entry)    # S'assurer que c'est bien le format attendu
+                ################ INPUT ################################################# faire une fonction car copié coller input et output
+                if is_setted("inputs", debian_edam_entry):
+                    db_funct_inputs = get_value("inputs", debian_edam_entry)
+                    for db_funct_input in db_funct_inputs:
+                        format_term_tab=get_value("formats",db_funct_input)
+                        format_tab=[]
+                        if (format_term_tab == None):
+                            announcement("\n/!\(2.1) package \"" + debian_entry['package'] + "\", the input \"" + str(db_funct_input) + "\ is unrecognized (maybe format instead of formats?)")
+                        else:
+                            for format_term in format_term_tab:
+                                format=search_owl(format_term, debian_entry, "format")
+                                if format != None:
+                                    format_tab.append(format)
+                        data_term = get_value("data", db_funct_input)
+                        data = search_owl(data_term, debian_entry, "data")
+                        if data != None:
+                            input = dict(data=data, format=format_tab)
+                            biotools_function['input'].append(input)
+                ################ OUTPUT ################################################
+                if is_setted("outputs", debian_edam_entry):
+                    db_funct_outputs = get_value("outputs", debian_edam_entry)
+                    for db_funct_output in db_funct_outputs:
+                        format_term_tab=get_value("formats",db_funct_output)
+                        format_tab=[]
+                        if(format_term_tab==None):
+                            announcement("\n/!\(2.2) package \"" + debian_entry['package'] + "\", the output \"" + str(db_funct_output) + "\ is unrecognized (maybe format instead of formats?)")
+                        else:
+                            for format_term in format_term_tab:
+                                format=search_owl(format_term, debian_entry, "format")
+                                if format != None:
+                                    format_tab.append(format)
+                        data_term = get_value("data", db_funct_output)
+                        data = search_owl(data_term, debian_entry, "data")
+                        if data != None:
+                            output = dict(data=data, format=format_tab)
+                            biotools_function['output'].append(output)
+                 ########################################################################
             biotools_functions.append(biotools_function)
     return biotools_functions
 
@@ -199,6 +240,9 @@ def check_on_biotools(debianbt_entry,biotools_list):
                 return(biotools_entry)
         print("No Biotools entry where found for this package name, creation of a new entry:")
 
+###########
+
+
 ############ Functions compare_with_bt() ####
 def compare_with_bt(debianbt_entry,biotools_entry,biotools_list):
     biotoolexist=check_on_biotools(biotools_entry,biotools_list)
@@ -216,16 +260,26 @@ def compare_with_bt(debianbt_entry,biotools_entry,biotools_list):
                     list_change+=(str(diff[0])+"\t\t'"+str(diff[1])+"'\t\t:"+str(diff[2]) + "\n")
                     diff_tab=re.sub('[[\]\'\s]', '', str(diff[1])).split(',')
                     diff_tab.append(None)
-
                     if (diff_tab[0] != None): #Recursif?
                         if (diff_tab[1] != None):
                             if (diff_tab[2] != None):
-                                NEW_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]=biotools_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
+                                if (diff_tab[3] != None):
+                                    NEW=NEW_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])]
+                                    APPEND=biotools_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])]
+                                else:
+                                    NEW=NEW_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
+                                    APPEND=biotools_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
                             else:
-                                NEW_entry[diff_tab[0]][int(diff_tab[1])] = biotools_entry[diff_tab[0]][int(diff_tab[1])]
+                                NEW=NEW_entry[diff_tab[0]][int(diff_tab[1])]
+                                APPEND=biotools_entry[diff_tab[0]][int(diff_tab[1])]
                         else:
-                            NEW_entry[diff[1]]=biotools_entry[diff[1]]
-
+                            NEW=NEW_entry[diff[1]]
+                            APPEND=biotools_entry[diff[1]]
+                    if isinstance(APPEND, list):
+                        for a in APPEND :
+                            NEW.append(a)
+                    else:
+                        NEW=APPEND
         biotools_entry=NEW_entry  #Ne prend pas en compte les changements, juste les ajout
         if(bool_add):
             biotool_modif_list.append(biotools_entry)
@@ -240,8 +294,8 @@ def compare_with_bt(debianbt_entry,biotools_entry,biotools_list):
             else:
                 biotools_file_change.write("\n\n(?) Link was made between the package name " + get_value('package', debianbt_entry) + " and the entry name on biotools: " + get_value('biotoolsID', biotoolexist))
             biotools_file_change.close()
-            print("Debian entry have value (listed before) that we can we can add to the corresponding biotools entry. See the corresponding log file "+ biotools_file_change_name +" and the json file created:")
-            return (biotools_file, debianbt_entry)
+            print("Debian entry have value (listed before) that we can add to the corresponding biotools entry. See the corresponding log file "+ biotools_file_change_name +" and the json file created:")
+            return (biotools_file, biotools_entry)
         else:
             print("No added value from debian entry, we keep the biotools entry with no change (No file will be created)")
             biotool_keep_list.append(biotoolexist)
@@ -308,12 +362,13 @@ i=0 #debug 10 lines
 
 for debianbt_entry in debian_med_metadata:
     i += 1
-    # if i<860  :#debug pass X lines
-    #     print(get_value('doi',debian_entry))
-    #     i += 1
-    #     continue
-    # if i == 100:
-    #     break
+
+    # if i<630  :#debug pass X lines
+    # #     print(get_value('doi',debian_entry))
+    # #     i += 1
+    #      continue
+    # # if i == 100:
+    # #     break
 
 
     print("\n|"+ str(i) + " " + get_value('package', debianbt_entry))
@@ -347,13 +402,13 @@ for debianbt_entry in debian_med_metadata:
     # -----------------------------------------------------------------------------------------------------------------------
     biotools_entry['function'] = search_function(debianbt_entry)
     # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['toolType'] = [] # debian_entry[''] ???
+    #NEW biotools_entry['toolType'] = ['Command-line tool'] # debian_entry[''] ???     "Command-line tool" ??
     # -----------------------------------------------------------------------------------------------------------------------
     biotools_entry['topic'] = search_topic(debianbt_entry)
     # -----------------------------------------------------------------------------------------------------------------------
     biotools_entry['operatingSystem'] = ["Linux"]
     # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['language'] = []
+    biotools_entry['language'] = get_value('compute_language', debianbt_entry)
     # -----------------------------------------------------------------------------------------------------------------------
     biotools_entry['license'] = None
     # -----------------------------------------------------------------------------------------------------------------------
