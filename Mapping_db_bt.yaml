@@ -1,3 +1,5 @@
+HMMER2:
+- hmmer2
 Jalview:
 - jalview
 abyss:
@@ -54,9 +56,13 @@ bio-tradis:
 - bio-tradis
 biobase:
 - r-bioc-biobase
+biocgenerics:
+- r-bioc-biocgenerics
 biomaj:
 - python3-biomaj3
 - python3-biomaj3-daemon
+biomart:
+- r-bioc-biomart
 bioperl:
 - bioperl
 biopython:
@@ -89,6 +95,8 @@ caftools:
 - caftools
 canu:
 - canu
+cd-hit:
+- cd-hit
 centrifuge:
 - centrifuge
 cgview:
@@ -108,6 +116,8 @@ cn3d:
 - ncbi-tools-x11
 cner:
 - r-bioc-cner
+cnvkit:
+- cnvkit
 crac:
 - crac
 cufflinks:
@@ -165,6 +175,8 @@ fastqc:
 - fastqc
 fasttree:
 - fasttree
+fastx-toolkit:
+- fastx-toolkit
 figtree:
 - figtree
 flexbar:
@@ -215,6 +227,12 @@ gwama:
 - gwama
 hilbertvis:
 - r-bioc-hilbertvis
+hisat2:
+- hisat2
+hmmer3:
+- hmmer
+htseq:
+- python-htseq
 idba:
 - idba
 - idba
@@ -267,6 +285,8 @@ maqview:
 mauve:
 - mauve-aligner
 - progressivemauve
+mcl:
+- mcl
 melting:
 - melting
 mergeomics:
@@ -275,6 +295,8 @@ metagenomeseq:
 - r-bioc-metagenomeseq
 metamix:
 - r-cran-metamix
+metaphlan:
+- metaphlan2
 metastudent:
 - metastudent
 - metastudent-data
@@ -296,8 +318,12 @@ muscle:
 - muscle
 mustang:
 - mustang
+nanook:
+- nanook
 ncoils:
 - ncoils
+neobio:
+- neobio
 njplot:
 - njplot
 norsnet:
@@ -361,14 +387,20 @@ profisis:
 - profisis
 proftmb:
 - proftmb
+prokka:
+- prokka
 prottest:
 - prottest
+pscanchip:
+- pscan-chip
 pybedtools:
 - python3-pybedtools
 pybel:
 - python3-pybel
 pycogent:
 - python-cogent
+pyfaidx:
+- python3-pyfaidx
 pymol:
 - pymol
 pyronoise:
@@ -377,14 +409,20 @@ pysam:
 - python3-pysam
 qiime:
 - qiime
+rainbow:
+- bio-rainbow
 rambo-k:
 - rambo-k
+rapmap:
+- rapmap
 rasmol:
 - rasmol
 raster3d:
 - raster3d
 raxml:
 - raxml
+ray:
+- ray
 readseq:
 - readseq
 reprof:
@@ -408,6 +446,8 @@ samblaster:
 - samblaster
 samtools:
 - samtools
+savr:
+- r-bioc-savr
 scoary:
 - scoary
 seaview:
@@ -423,12 +463,16 @@ seqtk:
 - seqtk
 sga:
 - sga
+shortread:
+- r-bioc-shortread
 sibsim4:
 - sibsim4
 sickle:
 - sickle
 sift:
 - sift
+sigma_align:
+- sigma-align
 sim4:
 - sim4
 smalt:
@@ -439,6 +483,8 @@ snap:
 - snap
 snp-o-matic:
 - snpomatic
+soap2:
+- soapaligner
 soapdenovo:
 - soapdenovo
 - soapdenovo2
@@ -448,6 +494,8 @@ sortmerna:
 - sortmerna
 spades:
 - spades
+sra-tools:
+- sra-toolkit
 ssake:
 - ssake
 sspace:
@@ -466,6 +514,8 @@ subread:
 - subread
 swarm:
 - swarm
+tcoffee:
+- t-coffee
 tcr:
 - r-cran-tcr
 tfbs:
@@ -489,6 +539,10 @@ trnascan-se:
 - trnascan-se
 ugene:
 - ugene
+unicycler:
+- unicycler
+variantannotation:
+- r-bioc-variantannotation
 varscan:
 - varscan
 vcflib:
