@@ -1,366 +1,504 @@
+# ##########################################################################
+# IMPORT ###################################################################
+
 import json
 import requests
-from owlready2 import *
+from owlready2 import get_ontology
 from datetime import datetime
 import re
 import dictdiffer
 import copy
 import yaml
 
-############ File : edam.json ####
-# File created with edam.sh script
-# from Andreas Tille (member of
-# the debian team)
-# https://salsa.debian.org/blends-team/website/blob/master/misc/sql/edam.sh
+# ##########################################################################
+# FILES ####################################################################
+
+# -- File : From debian ----------------------------------------------------
+# File created with PSQL request from Andreas Tille
+# (member of the debian team)
 print('loading debian data, please wait...')
-#debian_med_metadata = json.load(open('edam.json'))
-#debian_med_metadata = json.load(open('resultsSQLfile.json'))
+# debian_med_metadata = json.load(open('edam.json'))
+# debian_med_metadata = json.load(open('resultsSQLfile.json'))
 debian_med_metadata = json.load(open('edamv2.json'))
+# --------------------------------------------------------------------------
 
-############ File : biotools.json ####
+
+# -- File : From biotools --------------------------------------------------
+# File created requesting all the web pages of bio.tools
 print('loading bio.tools data, please wait...')
-biotools_list = json.load(open('biotools.json'))
+biotools_metadata_list = json.load(open('biotools.json'))
+# --------------------------------------------------------------------------
 
-############ File : EDAM_1.21.xrdf ####
+
+# -- File : EDAM ontology --------------------------------------------------
 # File with the last EDAM ontology
 # V1.21 Released on 07/31/2018
 onto = get_ontology("EDAM_1.21.xrdf")
 onto.load()
+# --------------------------------------------------------------------------
 
-############ File : Log.txt ####
-# File that show problems on
-# Debian EDAM structure
-fichier_log = open("Log.txt", "w")
-fichier_log.write("/!\(1) EDAM operation not find on edam onthology\n"
-                  "/!\(2) Bad typo for the function in edam.json\n"
-                  "/!\(3) Bad typo for the topic in edam.json\n"
-                  "/!\(4) Problem on DOI format\n"
-                  "/!\(5) DOi unrecognized\n"
-                  "/!\(6) Two entry of the package on edam.json\n"
-                  "/!\(7) Biotools ID on edam.json but no correspondance on bio.tools\n"
-                  "__________________________________________________________________\n\n")
 
-############ Function is_setted() ####
-# Check if an entry exist and is not
-# empty on the json
-def is_setted(value,entry):
+# -- File : Log.txt --------------------------------------------------------
+# File that show problems on Debian EDAM structure
+log_file = open("Log.txt", "w")
+log_file.write("/!\\(1) EDAM operation not find on edam ontology\n"
+               "/!\\(2) Bad typo for the function in edam.json\n"
+               "/!\\(3) Bad typo for the topic in edam.json\n"
+               "/!\\(4) Problem on DOI format\n"
+               "/!\\(5) DOi unrecognized\n"
+               "/!\\(6) Two entry of the package on edam.json\n"
+               "/!\\(7) Biotools ID on edam.json but no correspondence on bio.tools\n"
+               "/!\\(8) Debian package exist on Biotools but don't have BiotoolsID\n"
+               "__________________________________________________________________\n\n")
+# --------------------------------------------------------------------------
+
+# ##########################################################################
+# FUNCTIONS ################################################################
+
+# -- Function is_set() --------------------------------------------------
+# Check if an entry exist and is not empty on the json
+def is_set(value, entry):
     if value in entry:
-        return (entry[value] != None)
+        return entry[value] is not None
     else:
         return False
+# --------------------------------------------------------------------------
 
-############ Function get_value() ####
-# Return the value from a dict if it's
-# exist
+
+# -- Function get_value() --------------------------------------------------
+# Return the value from a dict if it's exist
 def get_value(value, entry):
-    if (is_setted(value, entry)):
+    if is_set(value, entry):
         return entry[value]
     else:
         return None
+# --------------------------------------------------------------------------
 
-############ Function announcement() ####
+
+# -- Function advertisement() -----------------------------------------------
 # Announce something on stdout and log.txt
-def announcement(text):
+def advertisement(text):
     print(text)
-    fichier_log.write(text+"\n")
+    log_file.write(text + "\n")
+# --------------------------------------------------------------------------
 
-############ Functions search_owl () ####
-# Search an uri from EDAM ontology file
-# in a specified category
-def search_owl(entry,debian_entry,category):
-    operation = dict(term=None,uri=None)
-    myonto = onto.search_one(label=entry,iri="*"+category+"*")
-    if not myonto:
-        announcement("\n/!\(1) package \"" + debian_entry['package'] + "\", no EDAM " + category +" for \"" + entry + "\" on http://bioportal.bioontology.org/ontologies/EDAM version 1.21")
+
+# -- Function search_owl () ------------------------------------------------
+# Search an uri from EDAM ontology file in a specified category
+def search_owl(onto_term, debian_entry, onto_category):
+    operation = dict(term=None, uri=None)
+    my_onto = onto.search_one(label=onto_term, iri="*" + onto_category + "*")
+    if not my_onto:
+        advertisement("\n/!\\(1) package \"" + debian_entry['package']
+                      + "\", no EDAM " + onto_category + " for \"" + onto_term
+                      + "\" found on http://bioportal.bioontology.org/ontologies/EDAM version 1.21")
     else:
-        operation['term'] = entry
-        operation['uri'] = myonto.iri
+        operation['term'] = onto_term
+        operation['uri'] = my_onto.iri
         return operation
+# --------------------------------------------------------------------------
 
-############ Functions search_function() ####
+
+# -- Function search_input_output() ----------------------------------------
+# Search on debian entry "data" and "format" value
+# for the input or the output
+def search_input_output(debian_entry, debian_edam_entry, element):
+    # 'element' = "input" or "output"
+    tab_in_out = []
+    if is_set(element, debian_edam_entry):
+        db_value_ins_outs = get_value(element, debian_edam_entry)
+        for db_value_in_out in db_value_ins_outs:
+            # 1) get the format(s) of the of the input/output
+            format_term_tab = get_value("formats", db_value_in_out)
+            format_tab = []
+            if format_term_tab is None:
+                advertisement("\n/!\\(2.1) package \"" + debian_entry['package']
+                              + "\", the " + element + " \"" + str(db_value_in_out)
+                              + "\" is unrecognized "
+                              + "(maybe its written 'format' instead of 'formats'?)")
+            else:
+                for format_term in format_term_tab:
+                    format_value = search_owl(format_term, debian_entry, "format")
+                    if format_value is not None:
+                        format_tab.append(format_value)
+            # 2) get the data term (=name) of the input/output
+            data_term = get_value("data", db_value_in_out)
+            data_value = search_owl(data_term, debian_entry, "data")
+            # 3) write the data and format on the input/output dict
+            if data_value is not None:
+                in_out = dict(data=data_value, format=format_tab)
+                tab_in_out.append(in_out)
+    return tab_in_out
+# --------------------------------------------------------------------------
+
+
+# -- Function search_function() --------------------------------------------
 # Search a function URI from EDAM 1.21
 # ==> See search_owl()
 def search_function(debian_entry):
     biotools_functions = []
-    if is_setted("edam_scopes", debian_entry):
+    if is_set("edam_scopes", debian_entry):
         for debian_edam_entry in debian_entry['edam_scopes']:
             biotools_function = dict(operation=[], input=[], output=[], note=None, cmd=None)
-            if is_setted('function', debian_edam_entry):
+            if is_set('function', debian_edam_entry):
+                # -- Operation ---------------------------------------------
                 operation_tab = []
                 if isinstance(debian_edam_entry['function'], list):
                     for function_entry in debian_edam_entry['function']:
                         operation = search_owl(function_entry, debian_entry, "operation")
-                        if operation != None:
+                        if operation is not None:
                             operation_tab.append(operation)
                 else:
-                    announcement("\n/!\(2.0) package \"" + debian_entry['package'] + "\", the function \"" + function_entry + "\" is written as a character string and not as a table, in the edam.json, it should look like this \" 'function': ['" + function_entry + "'] \"")
                     function_entry = get_value("function", debian_edam_entry)
-                    operation=search_owl(function_entry, debian_entry, "operation")
-                    if operation != None:
+                    # the field "function" need to be written as a list
+                    advertisement("\n/!\\(2.0) package \"" + debian_entry['package']
+                                  + "\", the function \"" + function_entry
+                                  + "\" is written as a character string and not as a table, in the edam.json,"
+                                  + " it should look like this \" 'function': ['" + function_entry + "'] \"")
+                    operation = search_owl(function_entry, debian_entry, "operation")
+                    if operation is not None:
                         operation_tab.append(operation)
                 biotools_function['operation'] = operation_tab
-                ################ INPUT ################################################# faire une fonction car copié coller input et output
-                if is_setted("inputs", debian_edam_entry):
-                    db_funct_inputs = get_value("inputs", debian_edam_entry)
-                    for db_funct_input in db_funct_inputs:
-                        format_term_tab=get_value("formats",db_funct_input)
-                        format_tab=[]
-                        if (format_term_tab == None):
-                            announcement("\n/!\(2.1) package \"" + debian_entry['package'] + "\", the input \"" + str(db_funct_input) + "\ is unrecognized (maybe format instead of formats?)")
-                        else:
-                            for format_term in format_term_tab:
-                                format=search_owl(format_term, debian_entry, "format")
-                                if format != None:
-                                    format_tab.append(format)
-                        data_term = get_value("data", db_funct_input)
-                        data = search_owl(data_term, debian_entry, "data")
-                        if data != None:
-                            input = dict(data=data, format=format_tab)
-                            biotools_function['input'].append(input)
-                ################ OUTPUT ################################################
-                if is_setted("outputs", debian_edam_entry):
-                    db_funct_outputs = get_value("outputs", debian_edam_entry)
-                    for db_funct_output in db_funct_outputs:
-                        format_term_tab=get_value("formats",db_funct_output)
-                        format_tab=[]
-                        if(format_term_tab==None):
-                            announcement("\n/!\(2.2) package \"" + debian_entry['package'] + "\", the output \"" + str(db_funct_output) + "\ is unrecognized (maybe format instead of formats?)")
-                        else:
-                            for format_term in format_term_tab:
-                                format=search_owl(format_term, debian_entry, "format")
-                                if format != None:
-                                    format_tab.append(format)
-                        data_term = get_value("data", db_funct_output)
-                        data = search_owl(data_term, debian_entry, "data")
-                        if data != None:
-                            output = dict(data=data, format=format_tab)
-                            biotools_function['output'].append(output)
-                 ########################################################################
+                # -- Input -------------------------------------------------
+                biotools_function['input'] = search_input_output(debian_entry, debian_edam_entry, "inputs")
+                # -- Output ------------------------------------------------
+                biotools_function['output'] = search_input_output(debian_entry, debian_edam_entry, "outputs")
+                # ----------------------------------------------------------
             biotools_functions.append(biotools_function)
     return biotools_functions
+# --------------------------------------------------------------------------
 
 
-############ Functions search_topic() ####
+# -- Function search_topic() -----------------------------------------------
 # Search a topic URI from EDAM 1.21
 # ==> See search_owl()
 def search_topic(debian_entry):
-    biotools_topics=[]
-    if is_setted("topics",debian_entry):
+    biotools_topics = []
+    if is_set("topics", debian_entry):
         if isinstance(debian_entry['topics'], list):
             for topics_entry in debian_entry['topics']:
-                biotools_topics.append(search_owl(topics_entry, debian_entry,"topic"))
+                biotools_topics.append(search_owl(topics_entry, debian_entry, "topic"))
         else:
             topics_entry = debian_entry['topics']
-            announcement("\n/!\(3) package \"" + debian_entry['package'] + "\", the Topic\"" + topics_entry + " is written as a character string and not as a table in the edam.json, it should look like this \" 'topic': ['" + topics_entry + "'] \"")
-            biotools_topics.append(search_owl(topics_entry, debian_entry,"topic"))
+            biotools_topics.append(search_owl(topics_entry, debian_entry, "topic"))
+            # the field "topics" need to be written as a list
+            advertisement("\n/!\\(3) package \"" + debian_entry['package']
+                          + "\", the Topic\"" + topics_entry
+                          + " is written as a character string and not as a list in the edam.json,"
+                          + " it should look like this \" 'topic': ['" + topics_entry + "'] \"")
     return biotools_topics
+# --------------------------------------------------------------------------
 
-############ Functions search_publication() ####
-# Search pulication metadata from a doi
+
+# -- Function search_publication() -----------------------------------------
+# Search publication metadata from a doi
 def search_publication(debian_entry):
-    if(is_setted('doi',debian_entry)):
+    if is_set('doi', debian_entry):
         doi = debian_entry['doi']
-        m = re.search("(?P<excess>.*doi[^/:]*[\/:])(?P<doi>\d+.*$)", doi)
+        # Check if the DOI is well written
+        # noinspection PyPep8
+        m = re.search("(?P<excess>.*doi[^/:]*[/:])(?P<doi>\d+.*$)", doi)
         if m is not None:
-            newdoi=m.group('doi')
-            excess=m.group('excess')
-            announcement("\n/!\(4) package \"" + debian_entry['package'] + "\", in edam.json the doi \"" + doi + "\" can't be composed of the prefix \"" + excess + " \". It should be like: \"" + newdoi + "\"")
-            doi=newdoi
+            new_doi = m.group('doi')
+            excess = m.group('excess')
+            advertisement("\n/!\\(4) package \"" + debian_entry['package'] + "\", in edam.json the doi \""
+                          + doi + "\" can't be composed of the prefix \"" + excess
+                          + " \". It should be like: \"" + new_doi + "\"")
+            doi = new_doi
         authors_list = []
         metadata = dict(title="", abstract="", date="", citationCount="", authors=authors_list, journal="")
         publication = dict(doi=doi, pmid=None, pmcid=None, type=None, version=None, metadata=metadata)
-        publi = requests.get("https://doi.org/"+doi, headers={'Accept': 'application/vnd.citationstyles.csl+json'})
-        if (publi.status_code != 200):
-            announcement("\n/!\(5) package \"" + debian_entry['package'] + "\", in edam.json the doi :\"" + doi + "\" is not recognized by doi.org")
+        publi_from_doi = requests.get("https://doi.org/" + doi,
+                                      headers={'Accept': 'application/vnd.citationstyles.csl+json'})
+        # If the DOI is not found/recognized on doi.org
+        if publi_from_doi.status_code != 200:
+            advertisement("\n/!\\(5) package \"" + debian_entry['package']
+                          + "\", in edam.json the doi :\"" + doi + "\" is not recognized by doi.org")
             return None
-        publi_json = publi.json()
-        publication['type'] = get_value('type', publi_json)  # type
-        metadata['title'] = get_value('title', publi_json)  # metadata.title
-        metadata['abstract'] = get_value('abstract', publi_json) # metadata.abstract
-        if is_setted('indexed', publi_json):
-            metadata['date'] = get_value('date-time', publi_json['indexed'])  # metadata.date
-        metadata['citationCount'] = get_value('is-referenced-by-count',publi_json)  # metadata.citationCount   # S'en assurer
-        if (is_setted('author', publi_json)):
-            for authors_entry in publi_json['author']:  # metadata.authors
+        publi_json = publi_from_doi.json()
+
+        # Fill the publication dict with all the data from doi.org
+        publication['type'] = get_value('type', publi_json)
+        metadata['title'] = get_value('title', publi_json)
+        metadata['abstract'] = get_value('abstract', publi_json)
+        if is_set('indexed', publi_json):
+            metadata['date'] = get_value('date-time', publi_json['indexed'])
+        metadata['citationCount'] = get_value('is-referenced-by-count', publi_json)
+        if is_set('author', publi_json):
+            for authors_entry in publi_json['author']:
                 author = dict(name='')
-                if is_setted('family', authors_entry):
+                if is_set('family', authors_entry):
                     author['name'] = authors_entry['family'] + " " + authors_entry['given']
                     authors_list.append(author)
-                elif is_setted('literal', authors_entry):
+                elif is_set('literal', authors_entry):
+                    # noinspection PyPep8
                     m = re.search("(?P<given>.*)\s(?P<family>.*)", authors_entry['literal'])
                     if m is not None:
                         author['name'] = m.group('family') + " " + m.group('given')
                         authors_list.append(author)
-        metadata['authors'] = authors_list  # metadata.authors
-        metadata['journal'] = get_value('container-title', publi_json)  # metadata.journal
-        publication['metadata'] = metadata                    #metadata
+        metadata['authors'] = authors_list
+        metadata['journal'] = get_value('container-title', publi_json)
+        publication['metadata'] = metadata
+
         return [publication]
     else:
         return []
+# --------------------------------------------------------------------------
 
-############ Functions search_duplicate() ####
+
+# -- Function search_interface() -------------------------------------------
+# Search the bio.tools "Tool type" from debian "interface" tag
+def search_interface(debian_entry):
+    interface = get_value('interface', debian_entry)
+    if isinstance(interface, list):
+        interface = interface[0]    # (If there is multiple value we keep the first)
+    # Dict of the link between bt "Tool type" and db "interface"
+    interface_link = {
+        "commandline": ['Command-line tool'],
+        "shell": ['Command-line tool'],
+        "x11": ['Desktop application'],
+        "3d": ['Desktop application'],
+        "web": ['Web application']
+    }
+    return interface_link.get(interface, [])
+# --------------------------------------------------------------------------
+
+
+# -- Function search_duplicate() -------------------------------------------
 # Search duplicate package entry
-def search_duplicate(debian_entry,seen,double):
-    package=get_value('package', debian_entry)
-    if package not in seen:
-        seen.add(package)
+def search_duplicate(debian_entry, seen_list, duplicate_list):
+    package = get_value('package', debian_entry)
+# If package have not been seen : add it on the seen list
+    if package not in seen_list:
+        seen_list.add(package)
+# Else, had the package to the duplicate package list
     else:
-        announcement("\n/!\(6) package \"" + debian_entry['package'] + "\", has two entry into edam.json. Here are the difference")
-        double.append(package)
-        second_entry=debian_entry
+        duplicate_list.append(package)
+        advertisement("\n/!\\(6) package \"" + debian_entry['package']
+                      + "\", has two entry into edam.json. Here are the difference")
+# And show the differences between the two entry
+        second_entry = debian_entry
         first_entry = None
-        for debian_entry2 in debian_med_metadata:
-            if get_value('package', debian_entry2) == package :
-                first_entry = debian_entry2
+        # Search the first occurrence of the package
+        for entry in debian_med_metadata:
+            if get_value('package', entry) == package:
+                first_entry = entry
                 break
+        # Announce all the differences
         for diff in list(dictdiffer.diff(first_entry, second_entry)):
-                announcement("-In '"+str(diff[1])+"' :"+str(diff[2]))
-    return seen,double
+            advertisement("-In '" + str(diff[1]) + "' :" + str(diff[2]))
+    return seen_list, duplicate_list
+# --------------------------------------------------------------------------
 
-############ Functions check_on_biotools() ####
-def check_on_biotools(debianbt_entry,biotools_list):
-    db_biotoolsID=get_value('biotoolsID', debianbt_entry)
-    db_package=get_value('name', debianbt_entry)
-    if db_biotoolsID != None:
+
+# -- Function check_on_biotools() ------------------------------------------
+def check_on_biotools(debian_entry, biotools_list):
+    db_biotools_id = get_value('biotoolsID', debian_entry)
+    db_package = get_value('name', debian_entry)
+    # If debian entry have a biotools ID we search it on biotools list
+    if db_biotools_id is not None:
         for biotools_entry in biotools_list:
-            if biotools_entry['biotoolsID'].lower() == db_biotoolsID.lower():
+            if biotools_entry['biotoolsID'].lower() == db_biotools_id.lower():
                 biotool_exist_list.append(biotools_entry)
-                biotool_exist_wthbtid_list.append(biotools_entry['biotoolsID'])
+                biotool_exist_with_bt_id_list.append(biotools_entry['biotoolsID'])
                 print("Debian BiotoolsID exist on Biotools")
-                print("bt_orig :" + biotools_entry['biotoolsID'] +" | db_btid :" + db_biotoolsID +" | db_pckg :" + db_package)
-                return(biotools_entry)
-        announcement("\n/!\(7) package \"" + db_package + "\", has an BiotoolsID (\'" + db_biotoolsID + "\')  but where not found in Biotools.")
-        return("notfound")
-    elif db_package != None:
+                print("bt_orig :" + biotools_entry[
+                    'biotoolsID'] + " | db_bt_id :" + db_biotools_id + " | db_pckg :" + db_package)
+                return biotools_entry
+        # If we never enter the "if" above its because the package was not found on biotools
+        advertisement("\n/!\\(7) package \"" + db_package + "\", has an BiotoolsID (\'"
+                      + db_biotools_id + "\')  but where not found in Biotools.")
+        return "not_found"
+    # If debian entry do not have a biotools ID we search it on biotools with the package name
+    elif db_package is not None:
         for biotools_entry in biotools_list:
             if biotools_entry['biotoolsID'].lower() == db_package.lower():
                 biotool_exist_list.append(biotools_entry)
-                print("Debian entry exist on Biotools but don't have BiotoolsID")
-                print("bt_orig :" + biotools_entry['biotoolsID'] + " | db_pckg :" + db_package)
-                return(biotools_entry)
+                advertisement("\n/!\\(8) Debian entry exist on Biotools but don't have BiotoolsID")
+                advertisement("bt_orig :" + biotools_entry['biotoolsID'] + " | db_pckg :" + db_package)
+                return biotools_entry
+        # If we never enter the "if" above its because the package was not found on biotools
         print("No Biotools entry where found for this package name, creation of a new entry:")
+# --------------------------------------------------------------------------
 
-###########
 
-
-############ Functions compare_with_bt() ####
-def compare_with_bt(debianbt_entry,biotools_entry,biotools_list):
-    biotoolexist=check_on_biotools(biotools_entry,biotools_list)
-    if biotoolexist != None and biotoolexist != "notfound":
+# -- Function compare_with_bt() --------------------------------------------
+# Search if the entry created for biotools is new or add a value to an existing entry
+# noinspection PyTypeChecker,PyPep8
+def compare_with_bt(debian_entry, new_bt_entry, biotools_list):
+    # Check on biotools_list if the debian entry exist on biotools
+    existing_biotools_entry = check_on_biotools(new_bt_entry, biotools_list)
+    # ---------------------------------------------
+    # If the debian entry have a biotools ID and exist on bio.tools
+    if existing_biotools_entry is not None and existing_biotools_entry != "not_found":
         bool_add = False
-        list_change = ("|Modif| \t\t|Label|\t\t|Bio.tools / Debian|\n")
-        NEW_entry = copy.deepcopy(biotoolexist)
-        for diff in list(dictdiffer.diff(biotoolexist,biotools_entry)):
-                if (str(diff[0]) == "add"):                                                                         # Pour prendre en compte les ajouts MAIS PAS LES MODIFS......
-                    if (re.search("authors", str(diff[1])) != None): #Ne prend pas les différences d'auteurs trouvés par dictdiffer
-                        continue
-                    bool_add=True
-                    print("|Modif| \t\t|Label|\t\t|Bio.tools / Debian|")
-                    print(str(diff[0])+"\t\t'"+str(diff[1])+"'\t\t:"+str(diff[2]))
-                    list_change+=(str(diff[0])+"\t\t'"+str(diff[1])+"'\t\t:"+str(diff[2]) + "\n")
-                    diff_tab=re.sub('[[\]\'\s]', '', str(diff[1])).split(',')
-                    diff_tab.append(None)
-                    if (diff_tab[0] != None): #Recursif?
-                        if (diff_tab[1] != None):
-                            if (diff_tab[2] != None):
-                                if (diff_tab[3] != None):
-                                    NEW=NEW_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])]
-                                    APPEND=biotools_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])]
-                                else:
-                                    NEW=NEW_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
-                                    APPEND=biotools_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
-                            else:
-                                NEW=NEW_entry[diff_tab[0]][int(diff_tab[1])]
-                                APPEND=biotools_entry[diff_tab[0]][int(diff_tab[1])]
-                        else:
-                            NEW=NEW_entry[diff[1]]
-                            APPEND=biotools_entry[diff[1]]
-                    if isinstance(APPEND, list):
-                        for a in APPEND :
-                            NEW.append(a)
-                    else:
-                        NEW=APPEND
-        biotools_entry=NEW_entry  #Ne prend pas en compte les changements, juste les ajout
-        if(bool_add):
-            biotool_modif_list.append(biotools_entry)
-            biotools_file = "NEWresult/Modif_" + debianbt_entry['package'] + ".json"
-            biotools_file_change_name = "NEWresult/Modif_" + debianbt_entry['package'] + "_log.txt"
-            biotools_file_change = open(biotools_file_change_name, "w")
-            biotools_file_change.write("\nChanges:\n" +list_change)
-            biotools_file_change.write("\nOrigin :\n" + str(biotoolexist))
-            biotools_file_change.write("\nChanged:\n" + str(biotools_entry))
-            if(is_setted('bio.tools', debianbt_entry)):
-                biotools_file_change.write("\n\n(?) Link was made using the biotoolsIDs: DB: " + get_value('bio.tools', debianbt_entry) + " BT: " + get_value('biotoolsID', biotoolexist))
-            else:
-                biotools_file_change.write("\n\n(?) Link was made between the package name " + get_value('package', debianbt_entry) + " and the entry name on biotools: " + get_value('biotoolsID', biotoolexist))
-            biotools_file_change.close()
-            print("Debian entry have value (listed before) that we can add to the corresponding biotools entry. See the corresponding log file "+ biotools_file_change_name +" and the json file created:")
-            return (biotools_file, biotools_entry)
-        else:
-            print("No added value from debian entry, we keep the biotools entry with no change (No file will be created)")
-            biotool_keep_list.append(biotoolexist)
-            print("bt:    " + str(biotools_entry))
-            return ("keepbt", biotools_entry)
-    elif biotoolexist == "notfound":
-        biotool_notfound_list.append(biotools_entry)
-        biotools_file = "NEWresult/NOTFOUND_" + debianbt_entry['package'] + ".json"
-        return(biotools_file, debianbt_entry)
-    else: # Si l'outil n'a pas d'entrée dans biotools
-        biotool_new_list.append(biotools_entry)
-        biotools_file = "NEWresult/NEW_" + debianbt_entry['package'] + ".json"
-        return(biotools_file, debianbt_entry)
+        list_change = "|Modif| \t\t|Label|\t\t|Bio.tools / Debian|\n"
+        new_entry = copy.deepcopy(existing_biotools_entry)
+        # Search the difference between the two entry
+        for diff in list(dictdiffer.diff(existing_biotools_entry, new_bt_entry)):
+            # In this case (:"add") we just manage differences that add a value to an existing biotools ID
+            if str(diff[0]) == "add":
+                # Do not manage authors diff
+                if re.search("authors", str(diff[1])) is not None:
+                    continue
+                bool_add = True
+                print("|Modif| \t\t|Label|\t\t|Bio.tools / Debian|")
+                print(str(diff[0]) + "\t\t'" + str(diff[1]) + "'\t\t:" + str(diff[2]))
+                list_change += (str(diff[0]) + "\t\t'" + str(diff[1]) + "'\t\t:" + str(diff[2]) + "\n")
+                diff_tab = re.sub('[[\]\'\s]', '', str(diff[1])).split(',')
+                # noinspection PyTypeChecker
+                diff_tab.append(None)
 
-############ Functions create_new_bt_file() ####
-def create_new_bt_file(debianbt_entry,biotools_entry,biotools_list):
-    biotools_file,biotools_entry=compare_with_bt(debianbt_entry,biotools_entry,biotools_list)
-    if(biotools_file!="keepbt"):
+                # #### Make it recursive ??
+                new = []
+                append = []
+                if diff_tab[1] is not None:
+                    if diff_tab[2] is not None:
+                        if diff_tab[3] is not None:
+                            if diff_tab[4] is not None:
+                                if diff_tab[5] is not None:
+                                    print("This case is not managed ...")
+                                    exit(1)
+                                else:
+                                    new = new_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])][diff_tab[4]]
+                                    append = new_bt_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])][diff_tab[4]]
+                            else:
+                                new = new_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])]
+                                append = new_bt_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]][int(diff_tab[3])]
+                        else:
+                            new = new_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
+                            append = new_bt_entry[diff_tab[0]][int(diff_tab[1])][diff_tab[2]]
+                    else:
+                        new = new_entry[diff_tab[0]][int(diff_tab[1])]
+                        append = new_bt_entry[diff_tab[0]][int(diff_tab[1])]
+                else:
+                    new = new_entry[diff[1]]
+                    append = new_bt_entry[diff[1]]
+                if isinstance(append, list):
+                    for a in append:
+                        bool_append = True
+                        if new:
+                            # Be sure to not copy an existing value
+                            for n in new:
+                                if a == n:
+                                    bool_append = False
+                                    break
+
+                        if bool_append:
+                            new.append(a)
+                else:
+                    print("This case is not managed ...")
+                    exit(1)
+                # ##########################
+
+        # "new" is linked to "new entry" so the change have been made in "new entry" too
+        new_bt_entry = new_entry
+        # Some logs:
+        if bool_add:
+            biotool_modif_list.append(new_bt_entry)
+            biotools_file = "NEWresult/Modif_" + debian_entry['package'] + ".json"
+            biotools_file_change_name = "NEWresult/Modif_" + debian_entry['package'] + "_log.txt"
+            biotools_file_change = open(biotools_file_change_name, "w")
+            biotools_file_change.write("\nChanges:\n" + list_change)
+            biotools_file_change.write("\nOrigin :\n" + str(existing_biotools_entry))
+            biotools_file_change.write("\nChanged:\n" + str(new_bt_entry))
+            if is_set('bio.tools', debian_entry):
+                biotools_file_change.write("\n\n(?) Link was made using the biotoolsIDs: DB: "
+                                           + get_value('bio.tools', debian_entry) + " BT: "
+                                           + get_value('biotoolsID', existing_biotools_entry))
+            else:
+                biotools_file_change.write("\n\n(?) Link was made between the package name "
+                                           + get_value('package', debian_entry) + " and the entry name on biotools: "
+                                           + get_value('biotoolsID', existing_biotools_entry))
+            biotools_file_change.close()
+            print("Debian entry have value (listed before) that we can add to the corresponding biotools entry. "
+                  "See the corresponding log file " + biotools_file_change_name + " and the json file created:")
+            return biotools_file, new_bt_entry
+        else:
+            print(
+                "No added value from debian entry, we keep the biotools entry with no change "
+                "(No file will be created)")
+            biotool_keep_list.append(existing_biotools_entry)
+            print("bt:    " + str(new_bt_entry))
+            return "keep_bt_entry", new_bt_entry
+    # ---------------------------------------------
+    # If the debian entry have a biotools ID but have not been found in bio.tools
+    elif existing_biotools_entry == "not_found":
+        biotool_not_found_list.append(new_bt_entry)
+        biotools_file = "NEWresult/NOTFOUND_" + debian_entry['package'] + ".json"
+        return biotools_file, debian_entry
+    # ---------------------------------------------
+    # If the debian entry do not exist on biotools
+    else:
+        biotool_new_list.append(new_bt_entry)
+        biotools_file = "NEWresult/NEW_" + debian_entry['package'] + ".json"
+        return biotools_file, debian_entry
+# --------------------------------------------------------------------------
+
+
+# -- Function create_new_bt_file() -----------------------------------------
+def create_new_bt_file(debian_entry, new_bt_entry, biotools_list):
+    # Search if the entry created for biotools is new or add a value to an existing entry
+    biotools_file, biotools_entry = compare_with_bt(debian_entry, new_bt_entry, biotools_list)
+    # If there is a interest to create a new entry or modify an entry on biotools
+    if biotools_file != "keep_bt_entry":    # keep_bt_entry = keep the biotool entry, do not create a new one
         print(biotools_file)
         json.dump(biotools_entry, open(biotools_file, 'w'))
+# --------------------------------------------------------------------------
 
-############ Functions mapping_biotoolsid() ####
-def mapping_biotoolsid(debianbt_entry,biotools_list,mapping):
-    db_biotoolsID=get_value('bio.tools', debianbt_entry)
-    db_package=get_value('package', debianbt_entry)
-    if db_biotoolsID != None:
+
+# -- Function mapping_biotools_id() -----------------------------------------
+# Search for biotools entry corresponding to the debian biotool ID
+def mapping_biotools_id(debian_entry, biotools_list, mapping_list):
+    db_biotools_id = get_value('bio.tools', debian_entry)
+    db_package = get_value('package', debian_entry)
+    # If debian entry have a "bio.tools" id
+    if db_biotools_id is not None:
+        # Search on the biotools_list the corresponding biotool entry
         for biotools_entry in biotools_list:
-            bt_biotoolsID=biotools_entry['biotoolsID']
-            if bt_biotoolsID.lower() == db_biotoolsID.lower():
-                if not is_setted(bt_biotoolsID,mapping) :
-                    mapping[bt_biotoolsID]=[]
-                mapping[bt_biotoolsID].append(db_package)
-    return mapping
+            bt_biotools_id = biotools_entry['biotoolsID']
+            if bt_biotools_id.lower() == db_biotools_id.lower():
+                # Create a table and append the packages found
+                if not is_set(bt_biotools_id, mapping_list):
+                    mapping_list[bt_biotools_id] = []
+                mapping_list[bt_biotools_id].append(db_package)
+    return mapping_list
+# --------------------------------------------------------------------------
 
-############ create_yaml() ####
-def create_yaml(filename, mapping):
+
+# -- Function create_yaml() ------------------------------------------------
+# Write a list into a yaml
+def create_yaml(filename, mapping_list):
     with open(filename, 'w') as f:
-        yaml.dump(mapping, f)
+        yaml.dump(mapping_list, f)
+# --------------------------------------------------------------------------
 
+# ##########################################################################
+# START ####################################################################
 
-#################################################################################
-# START
-
+# --------------------------------------------------------------------------
 # Tables to search duplicate package entry
 package_seen = set()
 package_double = []
 # Mapping between bio.tools & debian
-mapping=dict()
-# List for stats
+mapping = dict()
+# Lists for stats
 biotool_exist_list = []
-biotool_exist_wthbtid_list = []
+biotool_exist_with_bt_id_list = []
 biotool_new_list = []
 biotool_modif_list = []
 biotool_keep_list = []
-biotool_notfound_list = []
+biotool_not_found_list = []
 prospective_package_list = []
-
-# to see processing time
-start_datetime=datetime.now()
+# --------------------------------------------------------------------------
+# Processing time
+start_datetime = datetime.now()
 print(str(start_datetime))
 print('Starting analyses, please wait...\n')
+# --------------------------------------------------------------------------
 
-i=0 #debug 10 lines
-
-for debianbt_entry in debian_med_metadata:
+i = 0
+for debian_med_entry in debian_med_metadata:
     i += 1
 
     # if i<630  :#debug pass X lines
@@ -370,120 +508,135 @@ for debianbt_entry in debian_med_metadata:
     # # if i == 100:
     # #     break
 
-
-    print("\n|"+ str(i) + " " + get_value('package', debianbt_entry))
-    if (get_value('distribution', debianbt_entry) == "prospective"):
+    # ----------------------------------------------------------------------
+    print("\n|" + str(i) + " " + get_value('package', debian_med_entry))
+    # ----------------------------------------------------------------------
+    # Do not manage "prospective" debian packages
+    if get_value('distribution', debian_med_entry) == "prospective":
         print("Debian entry is prospective package")
-        prospective_package_list.append(debianbt_entry)
+        prospective_package_list.append(debian_med_entry)
         continue
-    mapping = mapping_biotoolsid(debianbt_entry, biotools_list, mapping)
-    # -----------------------------------------------------------------------------------------------------------------------
-    package_seen, package_double = search_duplicate(debianbt_entry, package_seen, package_double)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry = dict(name='', description='', homepage='', biotoolsID='', biotoolsCURIE='', version=[], otherID=[],
-                          function=[], toolType=[], topic=[], operatingSystem=[], language=[], license='',
-                          collectionID=[], maturity='', cost='', accessibility=[], elixirPlatform=[], elixirNode=[],
-                          link=[], download=[], documentation=[], publication=[], credit=[], owner='', additionDate='',
-                          lastUpdate='', editPermission=None, validated='', homepage_status='')
-    #-----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['name'] = get_value('package', debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['description'] = get_value('description', debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['homepage'] = get_value('homepage', debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['biotoolsID'] = get_value('bio.tools', debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['biotoolsCURIE'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['version'] = get_value('version', debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['otherID'] = []  # debian_entry['']  ????
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['function'] = search_function(debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    #NEW biotools_entry['toolType'] = ['Command-line tool'] # debian_entry[''] ???     "Command-line tool" ??
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['topic'] = search_topic(debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['operatingSystem'] = ["Linux"]
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['language'] = get_value('compute_language', debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['license'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['collectionID'] = []
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['maturity'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['cost'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['accessibility'] = []
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['elixirPlatform'] = []
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['elixirNode'] = []
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['link'] = []
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['download'] = []
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['documentation'] = ""  # debian_entry['']  A RETRAVAILLER
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['publication'] = search_publication(debianbt_entry)
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['credit'] = ""  # debian_entry['']  A RETRAVAILLER
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['owner'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['additionDate'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['lastUpdate'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['editPermission'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['validated'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['homepage_status'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    biotools_entry['elixir_badge'] = None
-    # -----------------------------------------------------------------------------------------------------------------------
-    # -----------------------------------------------------------------------------------------------------------------------
-    create_new_bt_file(debianbt_entry, biotools_entry, biotools_list)
-    # -----------------------------------------------------------------------------------------------------------------------
-    #------------------------------------------------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+    # Map the link between bio.tools id and debian biotools ID
+    mapping = mapping_biotools_id(debian_med_entry, biotools_metadata_list, mapping)
+    # ----------------------------------------------------------------------
+    # Search duplicate package entry
+    package_seen, package_double = search_duplicate(debian_med_entry, package_seen, package_double)
+    # ----------------------------------------------------------------------
+    # Define necessary fields to create a biotool entry
+    new_biotools_entry = dict(name='', description='', homepage='', biotoolsID='',
+                              biotoolsCURIE='', version=[], otherID=[], function=[],
+                              toolType=[], topic=[], operatingSystem=[], language=[],
+                              license='', collectionID=[], maturity='', cost='',
+                              accessibility=[], elixirPlatform=[], elixirNode=[],
+                              link=[], download=[], documentation=[], publication=[],
+                              credit=[], owner='', additionDate='', lastUpdate='',
+                              editPermission=None, validated='', homepage_status='')
+    # ----------------------------------------------------------------------
+    new_biotools_entry['name'] = get_value('package', debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['description'] = get_value('description', debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['homepage'] = get_value('homepage', debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['biotoolsID'] = get_value('bio.tools', debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['biotoolsCURIE'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['version'] = get_value('version', debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['otherID'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['function'] = search_function(debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['toolType'] = search_interface(debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['topic'] = search_topic(debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['operatingSystem'] = ["Linux"]
+    # ----------------------------------------------------------------------
+    new_biotools_entry['language'] = get_value('compute_language', debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['license'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['collectionID'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['maturity'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['cost'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['accessibility'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['elixirPlatform'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['elixirNode'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['link'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['download'] = []
+    # ----------------------------------------------------------------------
+    new_biotools_entry['documentation'] = ""
+    # ----------------------------------------------------------------------
+    new_biotools_entry['publication'] = search_publication(debian_med_entry)
+    # ----------------------------------------------------------------------
+    new_biotools_entry['credit'] = ""
+    # ----------------------------------------------------------------------
+    new_biotools_entry['owner'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['additionDate'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['lastUpdate'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['editPermission'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['validated'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['homepage_status'] = None
+    # ----------------------------------------------------------------------
+    new_biotools_entry['elixir_badge'] = None
+    # ----------------------------------------------------------------------
+    # ----------------------------------------------------------------------
+    # Write the biotools entry dict into a file, according if it exist or
+    # not and if its add an information to an existing entry
+    create_new_bt_file(debian_med_entry, new_biotools_entry, biotools_metadata_list)
+    # ----------------------------------------------------------------------
+    # ----------------------------------------------------------------------
 
-    # biotools_file = "JSONresult/" + debian_entry['package'] + ".json"
-    # #json.dump(biotools_entry,open(biotools_file,'w'))
-    # print(biotools_entry) ##
+    # if i==10 : break  #debug 10 lines
 
 
-    #if i==10 : break    #debug 10 lines
-
+# --------------------------------------------------------------------------
+# Create yaml file from mapping dict that make the ling between bio.tools
+# package and debian bio.tools ID
+create_yaml("Mapping_db_bt_draft.yaml", mapping)
+# --------------------------------------------------------------------------
 
 print('\ndone!')
 
-print("Number debian entry:")
-print(i)
-print("Number of db package exist on biotools :")
-print(len(biotool_exist_list))
-print("Number of db package have a Biotool ID:")
-print(len(biotool_exist_wthbtid_list))
-print("Number of db package with biotoolsID but not found on Biotools:")
-print(len(biotool_notfound_list))
-print("Number of new biotools package from debian:")
-print(len(biotool_new_list))
-print("Number of biotools package modified:")
-print(len(biotool_modif_list))
-print("Number of debian package seen two time in edam.json:")
-print(len(package_double))
-print("Number of package \"prospective\":")
-print(len(prospective_package_list))
-create_yaml("Mapping_db_bt_draft.yaml",mapping)
+# ##########################################################################
+# SUMMARY ##################################################################
 
-end_datetime=datetime.now()
-announcement("\n" + str(i) + " packages")
-announcement("\nstart    : " + str(start_datetime))
-announcement("end      : " + str(end_datetime))
-announcement("duration : " + str(end_datetime-start_datetime))
-fichier_log.close()
+# ----------------------------------------------------------------------
+advertisement("\nNumber of debian entry : " + str(len(debian_med_metadata)))
+# ----------------------------------------------------------------------
+print("Number of db package exist on biotools :", len(biotool_exist_list))
+# ----------------------------------------------------------------------
+print("Number of db package have a Biotool ID :", len(biotool_exist_with_bt_id_list))
+# ----------------------------------------------------------------------
+print("Number of db package with biotoolsID but not found on Biotools :", len(biotool_not_found_list))
+# ----------------------------------------------------------------------
+print("Number of new biotools package from debian :", len(biotool_new_list))
+# ----------------------------------------------------------------------
+print("Number of biotools package modified :", len(biotool_modif_list))
+# ----------------------------------------------------------------------
+print("Number of debian package seen two time in edam.json :", len(package_double))
+# ----------------------------------------------------------------------
+print("Number of package \"prospective\" :", len(prospective_package_list))
+# ----------------------------------------------------------------------
+end_datetime = datetime.now()
+advertisement("\nstart    : " + str(start_datetime))
+advertisement("end      : " + str(end_datetime))
+advertisement("duration : " + str(end_datetime - start_datetime))
+# ----------------------------------------------------------------------
+
+log_file.close()

@@ -21,7 +21,7 @@ fichier_log = open("Log_compare.txt", "w")
 ############ File : Merge.csv ####
 fichier_merge = open("Merge.csv", "w")
 
-############ Function is_setted() ####
+############ Function is_set() ####
 # Check if an entry exist and is not
 # empty on the json
 def is_setted(value,entry):
@@ -39,7 +39,7 @@ def get_value(value, entry):
     else:
         return None
 
-############ Function announcement() ####
+############ Function advertisement() ####
 # Announce something on stdout and log.txt
 def announcement(text):
     print(text)
